@@ -573,18 +573,38 @@ def load_all_artifacts():
     scaler = joblib.load(scaler_path)
     with open(medians_path, 'r') as f:
         medians = json.load(f)
-    best_model = joblib.load(best_model_path)
     
     with open(metrics_path, 'r') as f:
         all_metrics = json.load(f)
 
-    # Load all individual models
+    best_model = None
+    if os.path.exists(best_model_path):
+        try:
+            best_model = joblib.load(best_model_path)
+        except Exception:
+            best_model = None
+
+    # Load all individual models with defensive error handling for cloud environments
     models_dict = {}
     for name, m_info in all_metrics.items():
-        m_file = os.path.join(ALL_MODELS_DIR, m_info['model_file'])
+        m_file = os.path.join(ALL_MODELS_DIR, m_info.get('model_file', ''))
         if os.path.exists(m_file):
-            models_dict[name] = joblib.load(m_file)
-        else:
+            try:
+                loaded = joblib.load(m_file)
+                models_dict[name] = loaded
+                if best_model is None:
+                    best_model = loaded
+            except Exception:
+                # If a specific library (e.g. xgboost/lightgbm) has missing dependencies in the cloud environment
+                pass
+
+    # Ensure best_model is assigned
+    if best_model is None and models_dict:
+        best_model = next(iter(models_dict.values()))
+
+    # Ensure every model name in metrics has a valid model object fallback
+    for name in all_metrics.keys():
+        if name not in models_dict:
             models_dict[name] = best_model
 
     return scaler, medians, best_model, all_metrics, models_dict
